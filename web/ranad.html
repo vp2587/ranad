@@ -1,0 +1,459 @@
+<title>Ranad Ek</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chonburi&family=IBM+Plex+Sans+Thai:wght@500;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg-top: #3A0D12;
+    --bg-bottom: #120405;
+    --gold: #E2B34A;
+    --cream: #F7EBD3;
+    --cream-dim: #CDB9A0;
+    --chip: rgba(247, 235, 211, 0.08);
+    --ui: "IBM Plex Sans Thai", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --display: "Chonburi", "Thonburi", Georgia, serif;
+  }
+  html, body { height: 100%; }
+  body {
+    background: linear-gradient(var(--bg-top), var(--bg-bottom));
+    background-color: var(--bg-bottom);
+    color: var(--cream);
+    font-family: var(--ui);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 8px 4px;
+    box-sizing: border-box;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+  }
+  .name { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+  .name h1 {
+    margin: 0;
+    font: 400 22px/1.2 var(--display);
+    color: var(--gold);
+  }
+  .name span { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cream-dim); }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font: 600 13px/1 var(--ui);
+    color: var(--cream);
+    background: var(--chip);
+    border: 1px solid rgba(226, 179, 74, 0.55);
+    border-radius: 999px;
+    padding: 8px 12px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chip[aria-pressed="true"] { background: var(--gold); color: var(--bg-bottom); border-color: var(--gold); }
+  .chip:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+  .stage { position: relative; flex: 1; min-height: 0; margin-top: 6px; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  .start {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    background: rgba(18, 4, 5, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+  .start button {
+    display: grid; gap: 6px; justify-items: center;
+    font: 600 17px/1.3 var(--ui);
+    color: var(--bg-bottom);
+    background: var(--gold);
+    border: 0; border-radius: 18px;
+    padding: 18px 28px;
+    cursor: pointer;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+  .start button small { font-weight: 500; font-size: 13px; opacity: 0.8; }
+</style>
+
+<div class="app">
+  <header>
+    <div class="name"><h1>ระนาดเอก</h1><span>Ranad Ek</span></div>
+    <div class="controls">
+      <button class="chip" id="labels" aria-pressed="true">Labels</button>
+      <button class="chip" id="script" aria-pressed="true">ไทย</button>
+      <button class="chip" id="octaves" aria-pressed="false">Octaves</button>
+      <button class="chip" id="kro" aria-pressed="false">Kro</button>
+      <button class="chip" id="tuning" aria-pressed="false">Thai tuning</button>
+    </div>
+  </header>
+  <div class="stage" id="stage">
+    <canvas id="ranad" aria-label="Ranad ek with 21 wooden bars. Tap a bar to play it."></canvas>
+    <div class="start" id="start">
+      <button id="startButton">Tap to start playing<small>If you hear nothing, turn off silent mode</small></button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const BAR_COUNT = 21;
+  const LOWEST = 261.63;
+  const THAI_NAMES = ["โด", "เร", "มี", "ฟา", "ซอล", "ลา", "ที"];
+  const LATIN_NAMES = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Ti"];
+  const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+  const COLORS = {
+    gold: "#E2B34A", cream: "#F7EBD3",
+    barDark: "#6B3419", barMid: "#9C5630", barLight: "#C98552",
+    hull: "#6A2E14", hullDark: "#2E1208", cord: "#2A1A10"
+  };
+
+  // ---------- Settings ----------
+  const settings = { labels: true, thai: true, octaves: false, kro: false, western: false };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem("ranad-settings") || "{}")); } catch (e) {}
+  const save = () => { try { localStorage.setItem("ranad-settings", JSON.stringify(settings)); } catch (e) {} };
+
+  const chips = {
+    labels: document.getElementById("labels"),
+    script: document.getElementById("script"),
+    octaves: document.getElementById("octaves"),
+    kro: document.getElementById("kro"),
+    tuning: document.getElementById("tuning")
+  };
+  function syncChips() {
+    chips.labels.setAttribute("aria-pressed", settings.labels);
+    chips.script.hidden = !settings.labels;
+    chips.script.textContent = settings.thai ? "ไทย" : "ABC";
+    chips.script.setAttribute("aria-pressed", "true");
+    chips.octaves.setAttribute("aria-pressed", settings.octaves);
+    chips.kro.setAttribute("aria-pressed", settings.kro);
+    chips.tuning.textContent = settings.western ? "Western tuning" : "Thai tuning";
+    chips.tuning.setAttribute("aria-pressed", settings.western);
+  }
+  const toggle = (key) => () => { settings[key] = !settings[key]; save(); syncChips(); draw(); };
+  chips.labels.onclick = toggle("labels");
+  chips.script.onclick = toggle("thai");
+  chips.octaves.onclick = toggle("octaves");
+  chips.kro.onclick = toggle("kro");
+  chips.tuning.onclick = toggle("western");
+  syncChips();
+
+  function frequency(bar) {
+    if (!settings.western) return LOWEST * Math.pow(2, bar / 7);
+    const semis = MAJOR[bar % 7] + 12 * Math.floor(bar / 7);
+    return LOWEST * Math.pow(2, semis / 12);
+  }
+
+  // ---------- Audio: struck wooden bar ----------
+  let ctx = null, master = null, noiseBuffer = null;
+  const RATIOS = [1, 2.76, 5.40, 8.93];
+  const LEVELS = [1, 0.30, 0.12, 0.05];
+  const DECAYS = [1, 0.32, 0.13, 0.06];
+
+  function initAudio() {
+    if (ctx) { if (ctx.state !== "running") ctx.resume(); return; }
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC({ latencyHint: "interactive" });
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -10; comp.ratio.value = 6; comp.attack.value = 0.002; comp.release.value = 0.15;
+    master = ctx.createGain();
+    master.gain.value = 0.32;
+    master.connect(comp).connect(ctx.destination);
+    noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.06), ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    ctx.resume();
+  }
+
+  function playNote(freq, velocity) {
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.003;
+    const baseDecay = Math.max(0.18, Math.min(1.3, 0.95 * Math.pow(262 / freq, 0.6)));
+    const brightness = 0.55 + 0.45 * velocity;
+    for (let p = 0; p < RATIOS.length; p++) {
+      const f = freq * RATIOS[p];
+      if (f > ctx.sampleRate * 0.45) continue;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.frequency.value = f;
+      const peak = LEVELS[p] * velocity * (p === 0 ? 1 : brightness);
+      const tau = baseDecay * DECAYS[p];
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(peak, t + 0.0015);
+      g.gain.setTargetAtTime(0, t + 0.0015, tau);
+      osc.connect(g).connect(master);
+      osc.start(t);
+      osc.stop(t + tau * 7 + 0.05);
+    }
+    // Mallet "tock": a short burst of band-passed noise.
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = Math.min(5000, freq * 4); bp.Q.value = 0.9;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.7 * velocity * velocity, t);
+    ng.gain.setTargetAtTime(0, t, 0.01);
+    src.connect(bp).connect(ng).connect(master);
+    src.start(t);
+    src.stop(t + 0.06);
+  }
+
+  // ---------- Geometry (logical landscape space) ----------
+  const canvas = document.getElementById("ranad");
+  const g2 = canvas.getContext("2d");
+  let cssW = 0, cssH = 0, portrait = false, L = null;
+
+  function layout(W, H) {
+    const side = W * 0.07;
+    const slot = (W - side * 2) / BAR_COUNT;
+    const bw = slot * 0.84;
+    const longest = H * 0.62, shortest = H * 0.40, centerY = H * 0.44, sag = H * 0.07;
+    const bars = [];
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const t = i / (BAR_COUNT - 1);
+      const h = longest - (longest - shortest) * t;
+      const my = centerY + sag * Math.sin(Math.PI * t);
+      const mx = side + slot * (i + 0.5);
+      bars.push({ x: mx - bw / 2, y: my - h / 2, w: bw, h, mx, my });
+    }
+    return { W, H, side, slot, bars };
+  }
+
+  function toLogical(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
+    // In portrait the instrument is turned so the low bars sit at the bottom.
+    return portrait ? { x: cssH - py, y: px } : { x: px, y: py };
+  }
+
+  function barAt(p) {
+    if (!L) return null;
+    const col = Math.floor((p.x - L.side) / L.slot);
+    if (col < 0 || col >= BAR_COUNT) return null;
+    const b = L.bars[col];
+    const padX = (L.slot - b.w) / 2 + 1;
+    return (p.x >= b.x - padX && p.x <= b.x + b.w + padX && p.y >= b.y - 14 && p.y <= b.y + b.h + 14) ? col : null;
+  }
+
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    cssW = r.width; cssH = r.height;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    portrait = cssH > cssW * 1.1;
+    L = portrait ? layout(cssH, cssW) : layout(cssW, cssH);
+    g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  // ---------- Drawing ----------
+  const lit = new Map(); // bar -> time it was last struck
+  const held = new Map(); // pointerId -> bar
+  const FLASH_MS = 170;
+
+  function roundRect(x, y, w, h, r) {
+    g2.beginPath();
+    g2.moveTo(x + r, y);
+    g2.arcTo(x + w, y, x + w, y + h, r);
+    g2.arcTo(x + w, y + h, x, y + h, r);
+    g2.arcTo(x, y + h, x, y, r);
+    g2.arcTo(x, y, x + w, y, r);
+    g2.closePath();
+  }
+
+  function drawStand() {
+    const { W, H, slot, bars } = L;
+    const first = bars[0], last = bars[BAR_COUNT - 1], mid = bars[Math.floor(BAR_COUNT / 2)];
+    const left = { x: first.x - slot * 1.1, y: first.my - first.h * 0.08 };
+    const right = { x: last.x + last.w + slot * 1.1, y: last.my - last.h * 0.08 };
+    const rimMid = mid.my + mid.h * 0.12;
+    const rimC = { x: W / 2, y: 2 * rimMid - (left.y + right.y) / 2 };
+    const bottomSide = H * 0.84, bottomMid = H * 0.91;
+    const bL = { x: left.x + slot * 1.6, y: bottomSide }, bR = { x: right.x - slot * 1.6, y: bottomSide };
+    const bC = { x: W / 2, y: 2 * bottomMid - bottomSide };
+
+    // Pedestal foot
+    g2.beginPath();
+    g2.moveTo(W * 0.41, bottomMid - 4); g2.lineTo(W * 0.59, bottomMid - 4);
+    g2.lineTo(W * 0.64, H * 0.995); g2.lineTo(W * 0.36, H * 0.995); g2.closePath();
+    let grad = g2.createLinearGradient(0, bottomMid, 0, H);
+    grad.addColorStop(0, COLORS.hullDark); grad.addColorStop(1, COLORS.hull);
+    g2.fillStyle = grad; g2.fill();
+    g2.strokeStyle = "rgba(226,179,74,0.8)"; g2.lineWidth = 1.5; g2.stroke();
+
+    // Hull
+    g2.beginPath();
+    g2.moveTo(left.x, left.y);
+    g2.quadraticCurveTo(rimC.x, rimC.y, right.x, right.y);
+    g2.quadraticCurveTo(right.x, bottomSide, bR.x, bR.y);
+    g2.quadraticCurveTo(bC.x, bC.y, bL.x, bL.y);
+    g2.quadraticCurveTo(left.x, bottomSide, left.x, left.y);
+    g2.closePath();
+    grad = g2.createLinearGradient(0, rimMid, 0, bottomMid);
+    grad.addColorStop(0, COLORS.hull); grad.addColorStop(1, COLORS.hullDark);
+    g2.fillStyle = grad; g2.fill();
+    g2.strokeStyle = "rgba(0,0,0,0.6)"; g2.lineWidth = 2; g2.stroke();
+
+    // Gold rim and dashed band
+    g2.beginPath(); g2.moveTo(left.x, left.y); g2.quadraticCurveTo(rimC.x, rimC.y, right.x, right.y);
+    g2.strokeStyle = COLORS.gold; g2.lineWidth = 3; g2.stroke();
+    const off = H * 0.07;
+    g2.beginPath();
+    g2.moveTo(left.x + slot * 0.6, left.y + off);
+    g2.quadraticCurveTo(rimC.x, rimC.y + off, right.x - slot * 0.6, right.y + off);
+    g2.setLineDash([6, 5]); g2.strokeStyle = "rgba(226,179,74,0.55)"; g2.lineWidth = 2; g2.stroke();
+    g2.setLineDash([]);
+
+    // Curled ends
+    for (const e of [left, right]) {
+      g2.beginPath(); g2.arc(e.x, e.y, slot * 0.35, 0, Math.PI * 2);
+      g2.fillStyle = COLORS.gold; g2.fill();
+      g2.strokeStyle = COLORS.hullDark; g2.lineWidth = 1.5; g2.stroke();
+    }
+  }
+
+  function drawBars(now) {
+    const heldBars = new Set(held.values());
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const b = L.bars[i];
+      const since = now - (lit.get(i) ?? -1e9);
+      const glow = heldBars.has(i) ? 1 : Math.max(0, 1 - since / FLASH_MS);
+      const s = 1 - 0.04 * glow;
+      const w = b.w * s, h = b.h * s, x = b.mx - w / 2, y = b.my - h / 2;
+      const r = w * 0.3;
+
+      g2.save();
+      g2.shadowColor = glow > 0 ? `rgba(226,179,74,${0.9 * glow})` : "rgba(0,0,0,0.55)";
+      g2.shadowBlur = glow > 0 ? 14 * glow : 4;
+      g2.shadowOffsetY = glow > 0 ? 0 : 3;
+      roundRect(x, y, w, h, r);
+      const grad = g2.createLinearGradient(x, 0, x + w, 0);
+      grad.addColorStop(0, COLORS.barDark); grad.addColorStop(0.33, COLORS.barLight);
+      grad.addColorStop(0.66, COLORS.barMid); grad.addColorStop(1, COLORS.barDark);
+      g2.fillStyle = grad; g2.fill();
+      g2.restore();
+
+      if (glow > 0) { g2.fillStyle = `rgba(226,179,74,${0.45 * glow})`; g2.fill(); }
+      g2.strokeStyle = "rgba(0,0,0,0.5)"; g2.lineWidth = 1; g2.stroke();
+
+      if (settings.labels) {
+        const text = (settings.thai ? THAI_NAMES : LATIN_NAMES)[i % 7];
+        const size = Math.max(9, Math.min(15, b.w * 0.45));
+        g2.save();
+        g2.translate(b.mx, b.y + b.h * 0.76);
+        if (portrait) g2.rotate(Math.PI / 2);
+        g2.font = `600 ${size}px "IBM Plex Sans Thai", -apple-system, sans-serif`;
+        g2.textAlign = "center"; g2.textBaseline = "middle";
+        g2.fillStyle = COLORS.cream;
+        g2.fillText(text, 0, 0, portrait ? b.w * 2.5 : b.w * 1.15);
+        g2.restore();
+      }
+    }
+  }
+
+  function drawCords() {
+    const { slot, bars } = L;
+    const first = bars[0], last = bars[BAR_COUNT - 1];
+    g2.strokeStyle = COLORS.cord; g2.fillStyle = COLORS.cord; g2.lineWidth = 2;
+    for (const f of [0.1, 0.9]) {
+      g2.beginPath();
+      g2.moveTo(first.x - slot * 0.9, first.y + first.h * f);
+      for (const b of bars) g2.lineTo(b.mx, b.y + b.h * f);
+      g2.lineTo(last.x + last.w + slot * 0.9, last.y + last.h * f);
+      g2.stroke();
+      for (const b of bars) { g2.beginPath(); g2.arc(b.mx, b.y + b.h * f, 2.5, 0, Math.PI * 2); g2.fill(); }
+    }
+  }
+
+  let frame = 0;
+  function draw() {
+    if (frame) return;
+    frame = requestAnimationFrame(render);
+  }
+  function render() {
+    frame = 0;
+    if (!L) return;
+    const now = performance.now();
+    g2.save();
+    g2.clearRect(0, 0, cssW, cssH);
+    if (portrait) { g2.translate(0, cssH); g2.rotate(-Math.PI / 2); }
+    drawStand();
+    drawBars(now);
+    drawCords();
+    g2.restore();
+    for (const t of lit.values()) if (now - t < FLASH_MS) { draw(); break; }
+  }
+
+  // ---------- Playing ----------
+  function strike(bar, velocity) {
+    playNote(frequency(bar), velocity);
+    lit.set(bar, performance.now());
+    if (settings.octaves) {
+      const partner = bar >= 7 ? bar - 7 : bar + 7;
+      playNote(frequency(partner), velocity * 0.85);
+      lit.set(partner, performance.now());
+    }
+    draw();
+  }
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  canvas.addEventListener("pointerdown", (e) => {
+    initAudio();
+    canvas.setPointerCapture?.(e.pointerId);
+    const bar = barAt(toLogical(e.clientX, e.clientY));
+    held.set(e.pointerId, bar);
+    if (bar !== null) strike(bar, rand(0.85, 1));
+    e.preventDefault();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!held.has(e.pointerId)) return;
+    const bar = barAt(toLogical(e.clientX, e.clientY));
+    if (bar === held.get(e.pointerId)) return;
+    held.set(e.pointerId, bar);
+    if (bar !== null) strike(bar, rand(0.65, 0.8)); // glissando stroke
+    else draw();
+  });
+  const release = (e) => { held.delete(e.pointerId); draw(); };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // Kro (กรอ): hold a bar to roll a fast tremolo.
+  setInterval(() => {
+    if (!settings.kro) return;
+    for (const bar of new Set(held.values())) if (bar !== null) strike(bar, rand(0.55, 0.75));
+  }, 1000 / 14);
+
+  // Computer keyboard: Z–M, A–L, then Q–U play the bars from low to high.
+  const KEYS = "zxcvbnmasdfghjklqwertyu";
+  const down = new Set();
+  window.addEventListener("keydown", (e) => {
+    const i = KEYS.indexOf(e.key.toLowerCase());
+    if (i < 0 || i >= BAR_COUNT || down.has(i) || e.metaKey || e.ctrlKey) return;
+    down.add(i); initAudio(); hideStart(); strike(i, 0.9);
+  });
+  window.addEventListener("keyup", (e) => down.delete(KEYS.indexOf(e.key.toLowerCase())));
+
+  const start = document.getElementById("start");
+  function hideStart() { start.hidden = true; }
+  document.getElementById("startButton").addEventListener("click", () => {
+    initAudio();
+    hideStart();
+    strike(7, 0.8);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && ctx && ctx.state !== "running") ctx.resume();
+  });
+
+  new ResizeObserver(resize).observe(document.getElementById("stage"));
+  if (document.fonts) document.fonts.ready.then(draw);
+})();
+</script>
