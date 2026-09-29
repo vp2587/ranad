@@ -18,27 +18,31 @@ enum Tuning: String, CaseIterable, Identifiable {
     }
 }
 
-/// Pitch and naming for the 21 bars of a ranad ek (ระนาดเอก).
+/// Pitch and naming for the 22 bars of a ranad ek (ระนาดเอก):
+/// ช ล ท ด ร ม ฟ three times, then a fourth ช on top.
 enum RanadInstrument {
-    static let barCount = 21
+    static let barCount = 22
     static let notesPerOctave = 7
 
-    /// Pitch of the lowest (left-most) bar. The ranad ek sits well above middle C.
-    static let lowestFrequency = 330.0
+    /// Pitch of the lowest bar (ช) in Thai tuning.
+    static let thaiLowestFrequency = 330.0
+    /// Pitch of the lowest bar (Sol, G4) in Western tuning.
+    static let westernLowestFrequency = 392.0
 
-    static let thaiNames = ["โด", "เร", "มี", "ฟา", "ซอล", "ลา", "ที"]
-    static let latinNames = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Ti"]
+    static let thaiNames = ["ช", "ล", "ท", "ด", "ร", "ม", "ฟ"]
+    static let latinNames = ["Sol", "La", "Ti", "Do", "Re", "Mi", "Fa"]
 
-    private static let majorScaleSemitones = [0, 2, 4, 5, 7, 9, 11]
+    /// Semitones above Sol for Sol La Ti Do Re Mi Fa (G A B C D E F).
+    private static let semitonesFromSol = [0, 2, 4, 5, 7, 9, 10]
 
     static func frequency(ofBar bar: Int, tuning: Tuning) -> Double {
         switch tuning {
         case .thai:
-            return lowestFrequency * pow(2, Double(bar) / Double(notesPerOctave))
+            return thaiLowestFrequency * pow(2, Double(bar) / Double(notesPerOctave))
         case .western:
             let octave = bar / notesPerOctave
-            let semitones = majorScaleSemitones[bar % notesPerOctave] + 12 * octave
-            return lowestFrequency * pow(2, Double(semitones) / 12)
+            let semitones = semitonesFromSol[bar % notesPerOctave] + 12 * octave
+            return westernLowestFrequency * pow(2, Double(semitones) / 12)
         }
     }
 

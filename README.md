@@ -6,14 +6,14 @@ An iOS app for playing the Thai **ranad ek** (ระนาดเอก), the lea
 
 ## Features
 
-- **21 bars** of equal length side by side, lowest on the left, so every bar is an easy target.
+- **22 bars** in the ranad ek scale ช ล ท ด ร ม ฟ, three times over plus a fourth ช on top. The bars are all the same length and sit side by side, lowest on the left, so every bar is an easy target.
 - **Multi-touch**: every finger is a mallet. Tap to strike, slide across the bars for a glissando.
 - **Kro (กรอ)**: turn it on and hold a bar to roll the rapid tremolo that is typical of ranad playing.
 - **Octaves (ตีคู่แปด)**: every strike also plays the bar an octave away, the way ranad players usually play with two mallets.
-- **Thai or Western tuning**: Thai tuning splits the octave into seven equal steps. Western tuning uses a major scale, for playing along with other instruments.
-- Note labels in Thai (โด เร มี …) or Latin (Do Re Mi …), or none.
+- **Thai or Western tuning**: Thai tuning splits the octave into seven equal steps. Western tuning starts on G, for playing along with other instruments.
+- Note labels in Thai (ช ล ท ด ร ม ฟ) or Latin (Sol La Ti Do Re Mi Fa), or none.
 - No audio samples: each note is rendered from a physical model of a struck ranad bar. The model covers the bar's resonant modes with its strong bright overtone, a hard-mallet strike, the wooden "tak" of the hit, and the knock of the wooden body. A small room reverb is added on top.
-- The web version (`web/ranad.html`) is the same instrument and runs in a phone browser.
+- The web version (`web/ranad.html`) is the same instrument and runs in a phone browser. It adds a Sound panel for tuning the sound by ear, and it can play a recording of a real ranad note on every bar.
 
 ## Running it
 
