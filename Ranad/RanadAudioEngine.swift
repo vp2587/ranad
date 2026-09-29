@@ -1,31 +1,41 @@
 import AVFoundation
 import os
 
-/// Plays ranad notes through AVAudioEngine using a small real-time synthesizer.
+/// Plays ranad notes through AVAudioEngine. Every note is rendered once up front by
+/// `RanadBarModel`, then mixed on the audio thread by `RanadSampler`, followed by a
+/// small room reverb.
 final class RanadAudioEngine {
     private let engine = AVAudioEngine()
-    private let synth: RanadSynth
+    private let reverb = AVAudioUnitReverb()
+    private let sampler: RanadSampler
     private var observers: [NSObjectProtocol] = []
 
-    init() {
+    /// - Parameter noteFrequencies: every pitch the app can play; `noteOn` takes an index into it.
+    init(noteFrequencies: [Double]) {
         Self.configureSession()
         let sessionRate = AVAudioSession.sharedInstance().sampleRate
-        synth = RanadSynth(sampleRate: sessionRate > 0 ? sessionRate : 44_100)
+        let sampleRate = sessionRate > 0 ? sessionRate : 44_100
+        sampler = RanadSampler(notes: noteFrequencies.map { RanadBarModel.render(frequency: $0, sampleRate: sampleRate) },
+                               sampleRate: sampleRate)
 
-        let format = AVAudioFormat(standardFormatWithSampleRate: synth.sampleRate, channels: 1)!
-        let synth = self.synth
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let sampler = self.sampler
         let source = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let frames = Int(frameCount)
             guard let first = buffers.first?.mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-            synth.render(into: first, frameCount: frames)
+            sampler.render(into: first, frameCount: frames)
             for buffer in buffers.dropFirst() {
                 buffer.mData?.assumingMemoryBound(to: Float.self).update(from: first, count: frames)
             }
             return noErr
         }
+        reverb.loadFactoryPreset(.mediumRoom)
+        reverb.wetDryMix = 22
         engine.attach(source)
-        engine.connect(source, to: engine.mainMixerNode, format: format)
+        engine.attach(reverb)
+        engine.connect(source, to: reverb, format: format)
+        engine.connect(reverb, to: engine.mainMixerNode, format: nil)
         engine.prepare()
 
         let center = NotificationCenter.default
@@ -63,83 +73,135 @@ final class RanadAudioEngine {
         }
     }
 
-    func noteOn(frequency: Double, velocity: Float) {
-        synth.noteOn(frequency: Float(frequency), velocity: velocity)
+    func noteOn(_ note: Int, velocity: Float) {
+        sampler.noteOn(note, velocity: velocity)
     }
 }
 
-/// Modal synthesis of a struck hardwood bar: a few inharmonic, exponentially decaying
-/// partials plus a short band-passed noise burst for the hard mallet "tock".
-///
-/// `noteOn` may be called from any thread; `render` runs on the audio thread and never
-/// blocks or allocates.
-final class RanadSynth {
-    let sampleRate: Double
+/// Physical model of one struck ranad bar: the bar's resonant modes excited by a hard
+/// mallet, the wooden "tak" of the strike, and a knock from the boat-shaped body.
+enum RanadBarModel {
+    /// (frequency ratio, level, decay relative to the fundamental)
+    private static let modes: [(ratio: Double, level: Double, decay: Double)] = [
+        (1.000, 1.00, 1.00),
+        (1.004, 0.30, 0.85),  // a near-twin mode: the slight shimmer of a hand-tuned bar
+        (2.920, 0.62, 0.38),  // the strong, bright first overtone
+        (3.050, 0.16, 0.30),
+        (5.830, 0.30, 0.16),
+        (9.200, 0.12, 0.08),
+    ]
 
-    private static let maxVoices = 24
-    private static let partials = 4
+    static func render(frequency: Double, sampleRate sr: Double) -> [Float] {
+        let tau0 = max(0.10, min(0.55, 0.5 * pow(330 / frequency, 0.75)))
+        let length = Int((sr * (tau0 * 5 + 0.1)).rounded(.up))
+        var out = [Double](repeating: 0, count: length)
+        let contact = 0.00045 // seconds a hard mallet stays on the bar
+        let rise = 0.00015 * sr
+
+        for mode in modes {
+            let f = frequency * mode.ratio
+            guard f < sr * 0.45 else { continue }
+            // Spectrum of a short half-sine mallet pulse: harder mallets excite higher modes.
+            let x = 2 * f * contact
+            let mallet = abs(abs(x) - 1) < 0.001 ? Double.pi / 4 : abs(cos(Double.pi * f * contact) / (1 - x * x))
+            let w = 2 * Double.pi * f / sr
+            let d = exp(-1 / (tau0 * mode.decay * sr))
+            var env = mode.level * mallet
+            for n in 0..<length {
+                out[n] += env * sin(w * Double(n)) * (1 - exp(-Double(n) / rise))
+                env *= d
+                if env < 1e-5 { break }
+            }
+        }
+
+        // The "tak" of wood on wood: noise through a resonant band-pass.
+        let fc = min(4200, 2200 + frequency), q = 1.2
+        let w0 = 2 * Double.pi * fc / sr, r = exp(-w0 / (2 * q))
+        let a1 = 2 * r * cos(w0), a2 = -r * r
+        var y1 = 0.0, y2 = 0.0, clickEnv = 0.45
+        let clickDecay = exp(-1 / (0.0035 * sr))
+        var generator = SystemRandomNumberGenerator()
+        for n in 0..<min(length, Int(sr * 0.03)) {
+            let y = (1 - r) * Double.random(in: -1...1, using: &generator) + a1 * y1 + a2 * y2
+            y2 = y1
+            y1 = y
+            out[n] += y * clickEnv * 3
+            clickEnv *= clickDecay
+        }
+
+        // Hollow knock of the wooden body.
+        let bodyW = 2 * Double.pi * 190 / sr, bodyDecay = exp(-1 / (0.05 * sr))
+        var bodyEnv = 0.14
+        for n in 0..<length where bodyEnv > 1e-5 {
+            out[n] += bodyEnv * sin(bodyW * Double(n))
+            bodyEnv *= bodyDecay
+        }
+
+        let peak = out.reduce(0) { max($0, abs($1)) }
+        let norm = 0.8 / (peak > 0 ? peak : 1)
+        let fade = min(length, Int(sr * 0.02))
+        return out.enumerated().map { n, value in
+            let tail = length - 1 - n
+            let fadeGain = tail < fade ? Double(tail) / Double(fade) : 1
+            return Float(value * norm * fadeGain)
+        }
+    }
+}
+
+/// Mixes pre-rendered notes. `noteOn` may be called from any thread; `render` runs on
+/// the audio thread and never blocks or allocates.
+final class RanadSampler {
+    private struct Voice {
+        var note = -1
+        var position = 0
+        var gain: Float = 0
+        var fadeStep: Float = 0     // > 0 while being damped by a new strike on the same bar
+        var toneCoefficient: Float = 1
+        var toneState: Float = 0
+    }
+
+    private static let maxVoices = 32
     private static let queueCapacity = 64
-    private static let twoPi = Float.pi * 2
 
-    // Frequency ratios of a free–free wooden bar, with the level and relative decay of each.
-    private static let ratios: [Float] = [1.0, 2.76, 5.40, 8.93]
-    private static let levels: [Float] = [1.0, 0.30, 0.12, 0.05]
-    private static let decayScale: [Float] = [1.0, 0.32, 0.13, 0.06]
+    private let samples: [UnsafeMutableBufferPointer<Float>]
+    private let sampleRate: Double
+    private let voices: UnsafeMutablePointer<Voice>
 
-    // Voice state (audio thread only).
-    private let phase: UnsafeMutablePointer<Float>
-    private let increment: UnsafeMutablePointer<Float>
-    private let envelope: UnsafeMutablePointer<Float>
-    private let decay: UnsafeMutablePointer<Float>
-    private let noiseLevel: UnsafeMutablePointer<Float>
-    private let noiseDecay: UnsafeMutablePointer<Float>
-    private let noiseFast: UnsafeMutablePointer<Float>
-    private let noiseSlow: UnsafeMutablePointer<Float>
-    private let active: UnsafeMutablePointer<Bool>
-    private let startedAt: UnsafeMutablePointer<Int>
-    private var noteCounter = 0
-    private var randomState: UInt32 = 0x9E37_79B9
-    private let fastCoefficient: Float
-    private let slowCoefficient: Float
-
-    // Note-on queue shared between threads.
     private let lock: UnsafeMutablePointer<os_unfair_lock>
-    private let queuedFrequency: UnsafeMutablePointer<Float>
+    private let queuedNote: UnsafeMutablePointer<Int>
     private let queuedVelocity: UnsafeMutablePointer<Float>
     private var queuedCount = 0
 
-    init(sampleRate: Double) {
+    init(notes: [[Float]], sampleRate: Double) {
         self.sampleRate = sampleRate
-        let slots = Self.maxVoices * Self.partials
-        phase = .allocate(capacity: slots); phase.initialize(repeating: 0, count: slots)
-        increment = .allocate(capacity: slots); increment.initialize(repeating: 0, count: slots)
-        envelope = .allocate(capacity: slots); envelope.initialize(repeating: 0, count: slots)
-        decay = .allocate(capacity: slots); decay.initialize(repeating: 0, count: slots)
-        noiseLevel = .allocate(capacity: Self.maxVoices); noiseLevel.initialize(repeating: 0, count: Self.maxVoices)
-        noiseDecay = .allocate(capacity: Self.maxVoices); noiseDecay.initialize(repeating: 0, count: Self.maxVoices)
-        noiseFast = .allocate(capacity: Self.maxVoices); noiseFast.initialize(repeating: 0, count: Self.maxVoices)
-        noiseSlow = .allocate(capacity: Self.maxVoices); noiseSlow.initialize(repeating: 0, count: Self.maxVoices)
-        active = .allocate(capacity: Self.maxVoices); active.initialize(repeating: false, count: Self.maxVoices)
-        startedAt = .allocate(capacity: Self.maxVoices); startedAt.initialize(repeating: 0, count: Self.maxVoices)
-        lock = .allocate(capacity: 1); lock.initialize(to: os_unfair_lock())
-        queuedFrequency = .allocate(capacity: Self.queueCapacity); queuedFrequency.initialize(repeating: 0, count: Self.queueCapacity)
-        queuedVelocity = .allocate(capacity: Self.queueCapacity); queuedVelocity.initialize(repeating: 0, count: Self.queueCapacity)
-        fastCoefficient = Float(1 - exp(-2 * Double.pi * 4_500 / sampleRate))
-        slowCoefficient = Float(1 - exp(-2 * Double.pi * 900 / sampleRate))
+        samples = notes.map { note in
+            let buffer = UnsafeMutableBufferPointer<Float>.allocate(capacity: note.count)
+            _ = buffer.initialize(from: note)
+            return buffer
+        }
+        voices = .allocate(capacity: Self.maxVoices)
+        voices.initialize(repeating: Voice(), count: Self.maxVoices)
+        lock = .allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock())
+        queuedNote = .allocate(capacity: Self.queueCapacity)
+        queuedNote.initialize(repeating: 0, count: Self.queueCapacity)
+        queuedVelocity = .allocate(capacity: Self.queueCapacity)
+        queuedVelocity.initialize(repeating: 0, count: Self.queueCapacity)
     }
 
     deinit {
-        [phase, increment, envelope, decay, noiseLevel, noiseDecay, noiseFast, noiseSlow,
-         queuedFrequency, queuedVelocity].forEach { $0.deallocate() }
-        active.deallocate()
-        startedAt.deallocate()
+        samples.forEach { $0.deallocate() }
+        voices.deallocate()
         lock.deallocate()
+        queuedNote.deallocate()
+        queuedVelocity.deallocate()
     }
 
-    func noteOn(frequency: Float, velocity: Float) {
+    func noteOn(_ note: Int, velocity: Float) {
+        guard samples.indices.contains(note) else { return }
         os_unfair_lock_lock(lock)
         if queuedCount < Self.queueCapacity {
-            queuedFrequency[queuedCount] = frequency
+            queuedNote[queuedCount] = note
             queuedVelocity[queuedCount] = max(0, min(1, velocity))
             queuedCount += 1
         }
@@ -150,105 +212,59 @@ final class RanadSynth {
         // Never block the audio thread: if the UI thread holds the lock, pick the notes up next buffer.
         if os_unfair_lock_trylock(lock) {
             for i in 0..<queuedCount {
-                startVoice(frequency: queuedFrequency[i], velocity: queuedVelocity[i])
+                start(note: queuedNote[i], velocity: queuedVelocity[i])
             }
             queuedCount = 0
             os_unfair_lock_unlock(lock)
         }
 
         output.update(repeating: 0, count: frameCount)
-        let partials = Self.partials
-        let twoPi = Self.twoPi
-
-        for v in 0..<Self.maxVoices where active[v] {
-            var loudness: Float = 0
-            for p in 0..<partials {
-                let slot = v * partials + p
-                var env = envelope[slot]
-                guard env > 1e-5 else { continue }
-                var ph = phase[slot]
-                let inc = increment[slot]
-                let d = decay[slot]
-                for n in 0..<frameCount {
-                    output[n] += sinf(ph) * env
-                    ph += inc
-                    if ph >= twoPi { ph -= twoPi }
-                    env *= d
+        for v in 0..<Self.maxVoices where voices[v].note >= 0 {
+            var voice = voices[v]
+            let sample = samples[voice.note]
+            let count = min(frameCount, sample.count - voice.position)
+            for n in 0..<count {
+                voice.toneState += voice.toneCoefficient * (sample[voice.position + n] - voice.toneState)
+                output[n] += voice.toneState * voice.gain
+                if voice.fadeStep > 0 {
+                    voice.gain = max(0, voice.gain - voice.fadeStep)
                 }
-                phase[slot] = ph
-                envelope[slot] = env
-                loudness += env
             }
-
-            var level = noiseLevel[v]
-            if level > 1e-5 {
-                var fast = noiseFast[v]
-                var slow = noiseSlow[v]
-                let nd = noiseDecay[v]
-                for n in 0..<frameCount {
-                    let white = nextRandom()
-                    fast += fastCoefficient * (white - fast)
-                    slow += slowCoefficient * (white - slow)
-                    output[n] += (fast - slow) * level
-                    level *= nd
-                }
-                noiseFast[v] = fast
-                noiseSlow[v] = slow
-                noiseLevel[v] = level
-                loudness += level
+            voice.position += count
+            if voice.position >= sample.count || (voice.fadeStep > 0 && voice.gain <= 0) {
+                voice.note = -1
             }
-
-            if loudness < 1e-4 { active[v] = false }
+            voices[v] = voice
         }
 
         for n in 0..<frameCount {
-            output[n] = tanhf(output[n] * 0.45)
+            output[n] = tanhf(output[n] * 0.7)
         }
     }
 
-    private func startVoice(frequency: Float, velocity: Float) {
-        // Take a free voice, or steal the oldest one.
-        var voice = 0
-        var oldest = Int.max
+    private func start(note: Int, velocity: Float) {
+        // A struck bar doesn't keep adding up: damp what is still ringing on this bar.
+        let fadeStep = Float(1 / (0.015 * sampleRate))
+        for v in 0..<Self.maxVoices where voices[v].note == note && voices[v].fadeStep == 0 {
+            voices[v].fadeStep = voices[v].gain * fadeStep
+        }
+        // Take a free voice, or steal the one that has played longest.
+        var slot = 0
+        var oldestPosition = -1
         for v in 0..<Self.maxVoices {
-            if !active[v] { voice = v; break }
-            if startedAt[v] < oldest { oldest = startedAt[v]; voice = v }
-        }
-        noteCounter += 1
-        startedAt[voice] = noteCounter
-        active[voice] = true
-
-        let sr = Float(sampleRate)
-        // Short bars ring for less time than long ones.
-        let baseDecay = max(0.18, min(1.3, 0.95 * powf(262 / frequency, 0.6)))
-        // Harder hits bring out more of the upper partials.
-        let brightness = 0.55 + 0.45 * velocity
-
-        for p in 0..<Self.partials {
-            let slot = voice * Self.partials + p
-            let partialFrequency = frequency * Self.ratios[p]
-            phase[slot] = 0
-            guard partialFrequency < sr * 0.45 else {
-                envelope[slot] = 0
-                continue
+            if voices[v].note < 0 { slot = v; break }
+            if voices[v].position > oldestPosition {
+                oldestPosition = voices[v].position
+                slot = v
             }
-            increment[slot] = Self.twoPi * partialFrequency / sr
-            let tone = p == 0 ? 1 : brightness
-            envelope[slot] = Self.levels[p] * velocity * tone
-            let seconds = baseDecay * Self.decayScale[p]
-            decay[slot] = expf(-1 / (seconds * sr))
         }
-
-        noiseLevel[voice] = 0.9 * velocity * velocity
-        noiseDecay[voice] = expf(-1 / (0.010 * sr))
-        noiseFast[voice] = 0
-        noiseSlow[voice] = 0
-    }
-
-    private func nextRandom() -> Float {
-        randomState ^= randomState << 13
-        randomState ^= randomState >> 17
-        randomState ^= randomState << 5
-        return Float(randomState) / Float(UInt32.max) * 2 - 1
+        // Softer hits sound duller.
+        let cutoff = 1800 + 14000 * Double(velocity * velocity)
+        voices[slot] = Voice(note: note,
+                             position: 0,
+                             gain: powf(velocity, 1.3) * 0.6,
+                             fadeStep: 0,
+                             toneCoefficient: Float(1 - exp(-2 * Double.pi * cutoff / sampleRate)),
+                             toneState: 0)
     }
 }

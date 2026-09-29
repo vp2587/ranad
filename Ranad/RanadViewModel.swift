@@ -11,7 +11,10 @@ final class RanadViewModel: ObservableObject {
     /// Bars currently glowing: held under a finger or just struck.
     @Published private(set) var litBars: Set<Int> = []
 
-    private let audio = RanadAudioEngine()
+    /// Notes for every tuning, in `Tuning.allCases` order, `barCount` per tuning.
+    private let audio = RanadAudioEngine(noteFrequencies: Tuning.allCases.flatMap { tuning in
+        (0..<RanadInstrument.barCount).map { RanadInstrument.frequency(ofBar: $0, tuning: tuning) }
+    })
     private let defaults = UserDefaults.standard
     private var heldBars: Set<Int> = []
     private var flashingBars: Set<Int> = []
@@ -56,7 +59,8 @@ final class RanadViewModel: ObservableObject {
     }
 
     private func play(_ bar: Int, velocity: Float) {
-        audio.noteOn(frequency: RanadInstrument.frequency(ofBar: bar, tuning: tuning), velocity: velocity)
+        let tuningIndex = Tuning.allCases.firstIndex(of: tuning) ?? 0
+        audio.noteOn(tuningIndex * RanadInstrument.barCount + bar, velocity: velocity)
         flash(bar)
     }
 

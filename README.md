@@ -6,13 +6,14 @@ An iOS app for playing the Thai **ranad ek** (ระนาดเอก), the lea
 
 ## Features
 
-- **21 bars** hung on cords over a boat-shaped stand (รางระนาด), laid out like the real instrument: the longest, lowest bar on the left.
+- **21 bars** of equal length side by side, lowest on the left, so every bar is an easy target.
 - **Multi-touch**: every finger is a mallet. Tap to strike, slide across the bars for a glissando.
 - **Kro (กรอ)**: turn it on and hold a bar to roll the rapid tremolo that is typical of ranad playing.
 - **Octaves (ตีคู่แปด)**: every strike also plays the bar an octave away, the way ranad players usually play with two mallets.
 - **Thai or Western tuning**: Thai tuning splits the octave into seven equal steps. Western tuning uses a major scale, for playing along with other instruments.
 - Note labels in Thai (โด เร มี …) or Latin (Do Re Mi …), or none.
-- No audio samples: the sound is synthesized live. Each note is a set of decaying, inharmonic partials of a wooden bar plus a short noise burst for the hard mallet.
+- No audio samples: each note is rendered from a physical model of a struck ranad bar. The model covers the bar's resonant modes with its strong bright overtone, a hard-mallet strike, the wooden "tak" of the hit, and the knock of the wooden body. A small room reverb is added on top.
+- The web version (`web/ranad.html`) is the same instrument and runs in a phone browser.
 
 ## Running it
 
@@ -29,7 +30,7 @@ The app runs in landscape only. Sound plays even when the silent switch is on.
 | File | What it does |
 | --- | --- |
 | `RanadInstrument.swift` | Tuning, note names, and the bar geometry shared by drawing and touch handling |
-| `RanadAudioEngine.swift` | `AVAudioEngine` setup and the real-time bar synthesizer |
+| `RanadAudioEngine.swift` | `AVAudioEngine` setup, the ranad bar model, and the real-time note mixer |
 | `TouchSurface.swift` | Multi-touch handling (strikes, glissando, kro tremolo) |
 | `RanadViewModel.swift` | Settings and state for which bars are lit |
 | `ContentView.swift` | The SwiftUI instrument and controls |

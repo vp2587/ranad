@@ -23,8 +23,8 @@ enum RanadInstrument {
     static let barCount = 21
     static let notesPerOctave = 7
 
-    /// Pitch of the lowest (left-most, longest) bar.
-    static let lowestFrequency = 261.63
+    /// Pitch of the lowest (left-most) bar. The ranad ek sits well above middle C.
+    static let lowestFrequency = 330.0
 
     static let thaiNames = ["โด", "เร", "มี", "ฟา", "ซอล", "ลา", "ที"]
     static let latinNames = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Ti"]
@@ -63,36 +63,26 @@ struct RanadLayout {
     init(size: CGSize) {
         self.size = size
         let count = RanadInstrument.barCount
-        let sidePadding = size.width * 0.07
+        let sidePadding: CGFloat = 12
         let slot = (size.width - sidePadding * 2) / CGFloat(count)
-        let barWidth = slot * 0.84
-        let longest = size.height * 0.62
-        let shortest = size.height * 0.40
-        let centerY = size.height * 0.44
-        // The keyboard hangs on cords, so it sags a little in the middle.
-        let sag = size.height * 0.07
-
-        var rects: [CGRect] = []
-        for i in 0..<count {
-            let t = CGFloat(i) / CGFloat(count - 1)
-            let height = longest - (longest - shortest) * t
-            let midY = centerY + sag * sin(.pi * t)
+        let barWidth = slot * 0.86
+        // Every bar is the same length and sits on the same top and bottom line.
+        let top = size.height * 0.04
+        let height = size.height * 0.92
+        self.barRects = (0..<count).map { i in
             let midX = sidePadding + slot * (CGFloat(i) + 0.5)
-            rects.append(CGRect(x: midX - barWidth / 2, y: midY - height / 2, width: barWidth, height: height))
+            return CGRect(x: midX - barWidth / 2, y: top, width: barWidth, height: height)
         }
-        self.barRects = rects
         self.slotWidth = slot
         self.sidePadding = sidePadding
     }
 
-    /// The bar under a point. The gaps between bars count as part of the nearest bar
+    /// The bar under a point. Each bar owns its whole column, gaps included,
     /// so fast glissandos don't drop notes.
     func barIndex(at point: CGPoint) -> Int? {
         guard slotWidth > 0 else { return nil }
         let column = Int(floor((point.x - sidePadding) / slotWidth))
         guard barRects.indices.contains(column) else { return nil }
-        let rect = barRects[column]
-        let hitRect = rect.insetBy(dx: -(slotWidth - rect.width) / 2 - 1, dy: -14)
-        return hitRect.contains(point) ? column : nil
+        return point.y >= 0 && point.y <= size.height ? column : nil
     }
 }
