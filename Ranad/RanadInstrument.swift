@@ -25,9 +25,9 @@ enum RanadInstrument {
     static let notesPerOctave = 7
 
     /// Pitch of the lowest bar (ช) in Thai tuning.
-    static let thaiLowestFrequency = 330.0
-    /// Pitch of the lowest bar (Sol, G4) in Western tuning.
-    static let westernLowestFrequency = 392.0
+    static let thaiLowestFrequency = 165.0
+    /// Pitch of the lowest bar (Sol, G3) in Western tuning.
+    static let westernLowestFrequency = 196.0
 
     static let thaiNames = ["ช", "ล", "ท", "ด", "ร", "ม", "ฟ"]
     static let latinNames = ["Sol", "La", "Ti", "Do", "Re", "Mi", "Fa"]

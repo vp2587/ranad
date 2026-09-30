@@ -31,7 +31,7 @@ final class RanadAudioEngine {
             return noErr
         }
         reverb.loadFactoryPreset(.mediumRoom)
-        reverb.wetDryMix = 15
+        reverb.wetDryMix = 10
         engine.attach(source)
         engine.attach(reverb)
         engine.connect(source, to: reverb, format: format)
@@ -79,73 +79,83 @@ final class RanadAudioEngine {
 }
 
 /// Model of one struck ranad bar: a free wooden bar's modes excited by a hard mallet,
-/// plus the wooden "tak" of the strike and a hollow knock from the frame.
+/// plus the dry "tok" of the strike and a hollow knock from the frame.
 /// Matches the default settings of the web version's Sound panel.
 enum RanadBarModel {
-    private static let brightness = 0.70
-    private static let ring = 0.35
-    private static let knock = 0.45
+    private static let brightness = 0.60
+    private static let ring = 0.30
+    private static let knock = 0.60
 
     static func render(frequency: Double, sampleRate sr: Double) -> [Float] {
+        // Wood is heavily damped: the tone dies quickly and the overtones die almost at once,
+        // so they color the strike instead of ringing on like a bell.
         // (frequency ratio, level, decay relative to the fundamental)
         let modes: [(ratio: Double, level: Double, decay: Double)] = [
             (1.00, 1.00, 1.00),
-            (2.76, 0.25 + 0.45 * brightness, 0.30),
-            (5.40, 0.05 + 0.25 * brightness, 0.12),
-            (8.93, 0.12 * brightness, 0.06),
+            (2.76, 0.20 + 0.40 * brightness, 0.18),
+            (5.40, 0.05 + 0.20 * brightness, 0.08),
+            (8.93, 0.10 * brightness, 0.04),
         ]
-        let tau0 = max(0.04, min(1.6, (0.10 + 0.80 * ring) * pow(330 / frequency, 0.7)))
+        let tau0 = max(0.03, min(0.8, (0.05 + 0.45 * ring) * pow(165 / frequency, 0.6)))
         let length = Int((sr * (tau0 * 5 + 0.08)).rounded(.up))
         var out = [Double](repeating: 0, count: length)
-        let contact = 0.0012 + (0.00022 - 0.0012) * brightness // seconds the mallet stays on the bar
-        let rise = 0.00012 * sr
-        var fundamentalAmp = 1.0
+        var generator = SystemRandomNumberGenerator()
+        let noise = { Double.random(in: -1...1, using: &generator) }
 
+        // Excitation: a half-sine mallet pulse (shorter = harder mallet) with a little
+        // roughness from wood hitting wood.
+        let pulseLength = max(2, Int((0.0016 + (0.0003 - 0.0016) * brightness) * sr))
+        var excitation = [Double](repeating: 0, count: pulseLength + Int(0.005 * sr))
+        for n in excitation.indices {
+            if n < pulseLength { excitation[n] = sin(Double.pi * Double(n) / Double(pulseLength)) }
+            excitation[n] += noise() * 0.3 * exp(-Double(n) / (0.0012 * sr))
+        }
+
+        // Each mode is a two-pole resonator driven by the excitation.
+        var fundamentalPeak = 0.0
         for (index, mode) in modes.enumerated() {
             let f = frequency * mode.ratio
             guard f < sr * 0.45, mode.level > 0 else { continue }
-            // Spectrum of a short half-sine mallet pulse: harder mallets excite higher modes.
-            let x = 2 * f * contact
-            let mallet = abs(abs(x) - 1) < 0.001 ? Double.pi / 4 : abs(cos(Double.pi * f * contact) / (1 - x * x))
-            let amp = mode.level * mallet
-            if index == 0 { fundamentalAmp = amp > 0 ? amp : 1 }
-            let w = 2 * Double.pi * f / sr
-            let d = exp(-1 / (tau0 * mode.decay * sr))
-            var env = amp
-            var n = 0
-            while n < length && env > 1e-5 {
-                out[n] += env * sin(w * Double(n)) * (1 - exp(-Double(n) / rise))
-                env *= d
-                n += 1
-            }
-        }
-
-        // Short band-passed noise bursts.
-        var generator = SystemRandomNumberGenerator()
-        func burst(centre: Double, q: Double, level: Double, tau: Double) {
-            let w0 = 2 * Double.pi * centre / sr, r = exp(-w0 / (2 * q))
-            let a1 = 2 * r * cos(w0), a2 = -r * r
-            let d = exp(-1 / (tau * sr))
-            var y1 = 0.0, y2 = 0.0, env = level
-            var n = 0
-            while n < length && env > 1e-5 {
-                let y = (1 - r) * Double.random(in: -1...1, using: &generator) + a1 * y1 + a2 * y2
+            let w = 2 * Double.pi * f / sr, r = exp(-1 / (tau0 * mode.decay * sr))
+            let a1 = 2 * r * cos(w), a2 = -r * r, b0 = mode.level * sin(w)
+            var y1 = 0.0, y2 = 0.0
+            for n in 0..<length {
+                let y = b0 * (n < excitation.count ? excitation[n] : 0) + a1 * y1 + a2 * y2
                 y2 = y1
                 y1 = y
-                out[n] += y * env
-                env *= d
-                n += 1
+                out[n] += y
+                if index == 0 { fundamentalPeak = max(fundamentalPeak, abs(y)) }
+                if n > excitation.count && abs(y1) + abs(y2) < 1e-7 { break }
             }
         }
-        burst(centre: 1800 + (4500 - 1800) * brightness, q: 0.9, level: 1.6 * knock * fundamentalAmp, tau: 0.003)
-        burst(centre: 520, q: 4, level: 1.4 * knock * fundamentalAmp, tau: 0.02)
+        let norm = 1 / (fundamentalPeak > 0 ? fundamentalPeak : 1)
+        for n in out.indices { out[n] *= norm }
 
-        let norm = 0.5 / fundamentalAmp
+        // The dry "tok" of the strike and the hollow knock of the frame: short band-passed noise.
+        func burst(centre: Double, q: Double, peakLevel: Double, tau: Double) {
+            guard peakLevel > 0 else { return }
+            let count = min(length, Int(tau * 8 * sr))
+            var samples = [Double](repeating: 0, count: count)
+            let w0 = 2 * Double.pi * centre / sr, r = exp(-w0 / (2 * q))
+            let a1 = 2 * r * cos(w0), a2 = -r * r
+            var y1 = 0.0, y2 = 0.0, peak = 0.0
+            for n in 0..<count {
+                let y = noise() * exp(-Double(n) / (tau * sr)) + a1 * y1 + a2 * y2
+                y2 = y1
+                y1 = y
+                samples[n] = y
+                peak = max(peak, abs(y))
+            }
+            for n in 0..<count { out[n] += samples[n] * peakLevel / (peak > 0 ? peak : 1) }
+        }
+        burst(centre: 1500 + (3800 - 1500) * brightness, q: 1.4, peakLevel: 0.9 * knock, tau: 0.0025)
+        burst(centre: min(900, frequency * 1.8), q: 3, peakLevel: 0.7 * knock, tau: 0.025)
+
         let fade = min(length, Int(sr * 0.02))
         return out.enumerated().map { n, value in
             let tail = length - 1 - n
             let fadeGain = tail < fade ? Double(tail) / Double(fade) : 1
-            return Float(value * norm * fadeGain)
+            return Float(value * 0.55 * fadeGain)
         }
     }
 }
