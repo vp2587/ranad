@@ -29,7 +29,7 @@ final class RanadViewModel: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: [Keys.labels: true, Keys.thaiLabels: true])
+        defaults.register(defaults: [Keys.labels: true, Keys.thaiLabels: true, Keys.octaves: true, Keys.tremolo: true])
         showLabels = defaults.bool(forKey: Keys.labels)
         thaiLabels = defaults.bool(forKey: Keys.thaiLabels)
         octaves = defaults.bool(forKey: Keys.octaves)

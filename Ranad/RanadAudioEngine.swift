@@ -31,7 +31,7 @@ final class RanadAudioEngine {
             return noErr
         }
         reverb.loadFactoryPreset(.mediumRoom)
-        reverb.wetDryMix = 10
+        reverb.wetDryMix = 8
         engine.attach(source)
         engine.attach(reverb)
         engine.connect(source, to: reverb, format: format)
@@ -82,9 +82,9 @@ final class RanadAudioEngine {
 /// plus the dry "tok" of the strike and a hollow knock from the frame.
 /// Matches the default settings of the web version's Sound panel.
 enum RanadBarModel {
-    private static let brightness = 0.60
-    private static let ring = 0.30
-    private static let knock = 0.60
+    private static let brightness = 1.00
+    private static let ring = 0.40
+    private static let knock = 0.20
 
     static func render(frequency: Double, sampleRate sr: Double) -> [Float] {
         // Wood is heavily damped: the tone dies quickly and the overtones die almost at once,

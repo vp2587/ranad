@@ -177,10 +177,10 @@
     gold: "#E2B34A", cream: "#F7EBD3",
     barDark: "#6B3419", barMid: "#9C5630", barLight: "#C98552", cord: "#2A1A10"
   };
-  const DEFAULT_SOUND = { pitch: 0, bright: 60, ring: 30, knock: 60, echo: 12 };
+  const DEFAULT_SOUND = { pitch: 0, bright: 100, ring: 40, knock: 20, echo: 9 };
 
   // ---------- Settings ----------
-  const settings = { labels: true, thai: true, octaves: false, kro: false, western: false, sound: { ...DEFAULT_SOUND } };
+  const settings = { labels: true, thai: true, octaves: true, kro: true, western: false, sound: { ...DEFAULT_SOUND } };
   try {
     const stored = JSON.parse(localStorage.getItem("ranad-settings-v3") || "{}");
     Object.assign(settings, stored, { sound: { ...DEFAULT_SOUND, ...(stored.sound || {}) } });
