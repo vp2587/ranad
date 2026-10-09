@@ -110,7 +110,8 @@
   .panel h2 { margin: 0; font: 600 15px/1.2 var(--ui); color: var(--gold); }
   .panel p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--cream-dim); }
   .slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
-  .slider label { font-size: 13px; font-weight: 600; }
+  .slider label, .slider .label { font-size: 13px; font-weight: 600; }
+  .slider .row { grid-column: 1 / -1; }
   .slider output { font-size: 12px; color: var(--cream-dim); font-variant-numeric: tabular-nums; }
   .slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--gold); margin: 2px 0 0; }
   .panel .row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -146,8 +147,11 @@
       <p>Play the bars on the left while you adjust.</p>
 
       <div class="slider">
-        <label for="pitch">Pitch</label><output id="pitchOut"></output>
-        <input type="range" id="pitch" min="-12" max="12" step="1">
+        <span class="label" id="pitchLabel">Pitch</span>
+        <div class="row" role="group" aria-labelledby="pitchLabel">
+          <button class="chip small" id="pitch0" aria-pressed="true">0</button>
+          <button class="chip small" id="pitch2" aria-pressed="false">+2 semitones</button>
+        </div>
       </div>
       <div class="slider">
         <label for="bright">Mallet hardness</label><output id="brightOut"></output>
@@ -421,10 +425,18 @@
 
   // ---------- Sound panel ----------
   const SLIDERS = {
-    pitch: (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + " semitones",
     bright: (v) => v + "%", ring: (v) => v + "%", knock: (v) => v + "%", echo: (v) => v + "%"
   };
+  // Pitch is either as built (0) or two semitones up.
+  function setPitch(value) {
+    settings.sound.pitch = value;
+    $("pitch0").setAttribute("aria-pressed", value === 0);
+    $("pitch2").setAttribute("aria-pressed", value === 2);
+  }
+  $("pitch0").onclick = () => { setPitch(0); save(); prerender(); };
+  $("pitch2").onclick = () => { setPitch(2); save(); prerender(); };
   function syncSliders() {
+    setPitch(settings.sound.pitch === 2 ? 2 : 0);
     for (const [key, fmt] of Object.entries(SLIDERS)) {
       $(key).value = settings.sound[key];
       $(key + "Out").textContent = fmt(settings.sound[key]);
@@ -437,7 +449,6 @@
       $(key + "Out").textContent = fmt(settings.sound[key]);
       save();
       if (key === "echo") { if (wet) wet.gain.value = echoGain(); return; }
-      if (key === "pitch") { prerender(); return; }
       clearTimeout(rerenderTimer);
       rerenderTimer = setTimeout(() => { noteCache = new Map(); prerender(); }, 120);
     });
