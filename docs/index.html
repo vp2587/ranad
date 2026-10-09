@@ -180,7 +180,7 @@
     </div>
 
     <div class="start" id="start">
-      <button id="startButton">Tap to start playing<small>If you hear nothing, turn off silent mode</small></button>
+      <button id="startButton">Tap to start playing<small>Works with silent mode on. If you hear nothing, turn up the volume.</small></button>
     </div>
   </div>
 </div>
@@ -339,9 +339,39 @@
     return ir;
   }
 
-  function initAudio() {
-    if (ctx) { if (ctx.state !== "running") ctx.resume(); return; }
+  // iPhones mute Web Audio when the silent switch is on. Playing an inaudible <audio>
+  // loop moves the page into "playback" mode, like a music app, which ignores the switch.
+  let keepAlive = null;
+  function silentWav() {
+    const rate = 8000, samples = rate / 2; // half a second of 8-bit silence
+    const bytes = new Uint8Array(44 + samples);
+    const view = new DataView(bytes.buffer);
+    const text = (at, str) => { for (let i = 0; i < str.length; i++) bytes[at + i] = str.charCodeAt(i); };
+    text(0, "RIFF"); view.setUint32(4, 36 + samples, true); text(8, "WAVEfmt ");
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate, true);
+    view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    text(36, "data"); view.setUint32(40, samples, true);
+    bytes.fill(128, 44);
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return "data:audio/wav;base64," + btoa(binary);
+  }
+  function ignoreSilentSwitch() {
     try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    if (!keepAlive) {
+      keepAlive = document.createElement("audio");
+      keepAlive.setAttribute("playsinline", "");
+      keepAlive.setAttribute("x-webkit-airplay", "deny");
+      keepAlive.loop = true;
+      keepAlive.src = silentWav();
+    }
+    if (keepAlive.paused && !document.hidden) keepAlive.play().catch(() => {});
+  }
+
+  function initAudio() {
+    ignoreSilentSwitch();
+    if (ctx) { if (ctx.state !== "running") ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     ctx = new AC({ latencyHint: "interactive" });
     const comp = ctx.createDynamicsCompressor();
@@ -718,7 +748,10 @@
     strike(3, 0.8);
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && ctx && ctx.state !== "running") ctx.resume();
+    // Stop the silent loop in the background so it doesn't keep the phone's audio busy.
+    if (document.hidden) { if (keepAlive) keepAlive.pause(); return; }
+    if (keepAlive) keepAlive.play().catch(() => {});
+    if (ctx && ctx.state !== "running") ctx.resume();
   });
 
   syncChips();
