@@ -15,7 +15,19 @@ An iOS app for playing the Thai **ranad ek** (ระนาดเอก), the lea
 - No audio samples: each note is rendered from a physical model of a struck ranad bar. The model covers the bar's resonant modes with its strong bright overtone, a hard-mallet strike, the wooden "tak" of the hit, and the knock of the wooden body. A small room reverb is added on top.
 - The web version (`web/ranad.html`) is the same instrument and runs in a phone browser. It adds a Sound panel for tuning the sound by ear, and it can play a recording of a real ranad note on every bar.
 
-## Running it
+## Install it free as a home-screen app
+
+Once GitHub Pages is turned on for this repository (Settings → Pages → deploy from this branch, folder `/docs`), the web version is served at **https://vp2587.github.io/ranad/**.
+
+1. Open that link in Safari on your iPhone or iPad.
+2. Tap the Share button, then **Add to Home Screen**.
+3. Open **ระนาด** from your home screen. It runs full screen and keeps working offline.
+
+On Android, open the link in Chrome and choose **Install app** or **Add to Home screen** from the menu.
+
+The site lives in `docs/`. It is generated from `web/ranad.html`, so after changing that file run `python3 web/build_site.py` (needs Pillow) and commit `docs/`.
+
+## Running the native iOS app
 
 Requires Xcode 16 or later, and iOS 17 or later.
 
